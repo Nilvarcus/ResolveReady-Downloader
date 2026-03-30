@@ -1,59 +1,47 @@
-# ResolveReady-Downloader: Your YouTube-to-Resolve Workflow Killer
+# YouTube Resolve-Ready Downloader
 
-If you've spent any time trying to get a high-quality YouTube video into DaVinci Resolve, you already know the pain. It’s usually a multi-step nightmare: download the file, realize Resolve *hates* the container/codec combination, fire up HandBrake, wait for the conversion, and then finally trash the original huge file.
+A sleek, intuitive desktop application designed for video editors. It allows you to effortlessly download YouTube videos in up to 4K resolution alongside their English transcripts, and automatically transcodes them into a high-performance, editing-friendly format optimized for DaVinci Resolve.
 
-Honestly, I got tired of it. So, I built this simple application to do all of that with a single link paste. It handles the download, the **NVENC-accelerated conversion**, and the cleanup automatically, leaving you with a clean, ready-to-edit MP4 file right in a dedicated folder. It’s so much smoother!
+Built with Python, `yt-dlp`, and HandBrakeCLI, wrapped in a beautiful modern GUI using **CustomTkinter**.
 
-## ✨ Features That Make Editing Easier
+## ✨ Features
+- **Clean and Modern Interface:** Fully dark-mode responsive UI that stays smooth and snappy by performing heavy downloads and transcoding in the background.
+- **Selectable Resolutions:** Easily pick between 1080p, 1440p (2K), and 2160p (4K) source qualities.
+- **Automatic Transcripts:** A convenient toggle to download available hand-crafted or auto-generated English `.srt`/`.vtt` subtitle packages right next to your videos.
+- **Resolve-Ready Conversion:** Automatically runs downloaded footage through HandBrake to conform it to a professional standard (via a custom `resolve_preset.json`), bypassing compatibility errors and VFR (variable framerate) desyncs inside DaVinci Resolve.
+- **Custom Destinations:** Full freedom to pick exactly where both your subtitles and fully processed `.mp4` video files are saved.
 
-*   **One-Paste Automation:** Takes a YouTube URL, downloads the best quality available (video and audio), and immediately starts the conversion.
-*   **Truly Portable:** **All HandBrake files and the preset are bundled inside the EXE.** You only need one other dependency (FFmpeg) externally.
-*   **Resolve-Optimized Conversion:** Uses a built-in HandBrake preset to ensure the output file is one that DaVinci Resolve will happily chew through without any fuss.
-*   **Hardware Acceleration:** It leverages the speed of your NVIDIA card for lightning-fast encoding.
-*   **Automatic Cleanup:** After a successful conversion, it responsibly deletes the original, massive downloaded file, saving you disk space.
+## 📁 Architecture
+- `gui_app.py`: The frontend graphical application. Run this script to launch the interface.
+- `downloader.py`: The core backend logic handling `yt-dlp` interaction and HandBrake command-line dispatching.
+- `resolve_preset.json`: A custom HandBrake encoding preset tailored for Resolve workloads. 
+- `HandBrakeCLI.exe` & `ffmpeg.exe`: External command-line utilities used for high-tier demuxing, merging, and hardware-accelerated transcoding.
 
-***
+## 🚀 Getting Started
 
-### 🛑 CRITICAL WARNING: NVIDIA GPU REQUIRED
+### Using the Portable Application (Recommended)
+If you generated or downloaded the standalone application folder, all dependencies are fully packaged inside!
+1. Navigate to your `dist/ResolveReadyDownloader` folder.
+2. Double click `ResolveReadyDownloader.exe`.
 
-Before you download anything, let's be absolutely clear about one thing: **This tool is built for NVIDIA users.**
+### Running from Source
+If modifying the codebase or running directly using Python:
+1. Ensure you have Python 3.10+ installed.
+2. Clone or download this project folder.
+3. Install the required dependencies:
+   ```bash
+   pip install yt-dlp customtkinter
+   ```
+4. Verify you have `HandBrakeCLI.exe` and `ffmpeg.exe` in the root folder alongside `resolve_preset.json`.
+5. Launch the application:
+   ```bash
+   python gui_app.py
+   ```
 
-The custom HandBrake preset that's built-in is specifically configured to leverage **NVENC** (NVIDIA's hardware encoder) for maximum speed and file quality. I only own an NVIDIA card, so that's what I optimized for.
+## 🛠️ Building an Executable
+If you would like to rebuild the project into a portable `.exe` application directory using PyInstaller, run the following command in the project root:
 
-*   **If you have an NVIDIA GPU**, everything should work flawlessly.
-*   **If you have an AMD or Intel GPU**, the conversion will fail unless you build your own executable with a modified preset. I can't provide those alternative presets, sorry!
-
-***
-
-## 🚀 Setup & Installation (Just Two Files!)
-
-This workflow is now incredibly simple. You only need to place two items in the same folder.
-
-1.  **Download:** Grab the latest `ResolveReady-Downloader.exe` from the [Releases page].
-2.  **Get FFmpeg:** Download the `ffmpeg.exe` executable. You can usually find a static build from the official FFmpeg site or a trusted mirror.
-3.  **Place Together:** Put **both files** in the exact same folder on your machine:
-
-    *   `ResolveReady-Downloader.exe` (The main application, which contains HandBrakeCLI and the preset)
-    *   `ffmpeg.exe` (Required by the downloader to merge the high-quality video and audio streams)
-
-## 💡 How to Use It
-
-1.  Double-click `ResolveReady-Downloader.exe` to run the application. A console window will pop up.
-2.  The prompt will ask you for a link. Copy your full YouTube URL (e.g., `https://www.youtube.com/watch?v=...`) and paste it into the window.
-3.  Hit `Enter`.
-4.  The application will use `ffmpeg.exe` to finalize the high-quality download, and then immediately hand the file off to the built-in HandBrake, showing the progress bar updating in real time:
-    ```
-    Encoding: task 1 of 1, 84.03 % (10.97 fps, avg 15.00 fps, ETA 00h00m01s)
-    ```
-5.  When everything's done, the original downloaded file is deleted, and your new, clean, Resolve-friendly video is saved in a subfolder called **`Handbraked`** right next to the executable.
-6.  Type `exit` or `quit` when you're done.
-
-## ⚙️ Customizing the Built-in Preset
-
-The NVENC preset is currently baked right into the executable, which is what makes the distribution so clean. If you want to change the encoding settings (maybe you want H.265 instead of H.264, or a different quality level), you will need to:
-
-1.  Create your new `resolve_preset.json` file via HandBrake GUI.
-2.  Update the source code with your new preset.
-3.  **Re-build the executable** using PyInstaller (see the development instructions below) to bundle your new preset.
-
-This keeps the end-user experience simple, but gives developers the flexibility they need.
+```powershell
+pyinstaller --noconfirm --onedir --windowed --add-data "HandBrakeCLI.exe;." --add-data "resolve_preset.json;." --add-data "ffmpeg.exe;." --collect-all customtkinter --name "ResolveReadyDownloader" "gui_app.py"
+```
+Your compiled application will spit out safely into the generated `dist/` directory.
