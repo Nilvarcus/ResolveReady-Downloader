@@ -5,6 +5,7 @@ import yt_dlp
 import sys
 import os
 import subprocess
+import re
 
 # ==============================================================================
 # CONFIGURATION & PATHS
@@ -25,7 +26,7 @@ HANDBRAKE_PRESET_FILE = os.path.join(BUNDLE_DIR, "resolve_preset.json")
 # CORE FUNCTIONS
 # ==============================================================================
 
-def run_handbrake_conversion(source_filepath, output_dir, progress_callback=None):
+def run_handbrake_conversion(source_filepath, output_dir, progress_callback=None, progress_bar_callback=None):
     """
     Converts a single video file using HandBrake CLI.
     """
@@ -63,6 +64,13 @@ def run_handbrake_conversion(source_filepath, output_dir, progress_callback=None
         if "Encoding: task" in line:
             if progress_callback:
                 progress_callback(line.strip())
+            if progress_bar_callback:
+                match = re.search(r'(\d+(?:\.\d+)?)\s*%', line)
+                if match:
+                    try:
+                        progress_bar_callback(float(match.group(1)) / 100.0)
+                    except ValueError:
+                        pass
 
     process.stdout.close()
     return_code = process.wait()
@@ -80,7 +88,7 @@ def run_handbrake_conversion(source_filepath, output_dir, progress_callback=None
             progress_callback(f"Encoding failed. HandBrake exited with error code {return_code}.")
 
 
-def download_youtube_video(url, output_dir, resolution="1080p", download_transcripts=True, progress_callback=None):
+def download_youtube_video(url, output_dir, resolution="1080p", progress_callback=None, progress_bar_callback=None):
     """
     Downloads a YouTube video using yt-dlp and hands it to Handbrake.
     """
@@ -90,7 +98,7 @@ def download_youtube_video(url, output_dir, resolution="1080p", download_transcr
             filepath = d.get('info_dict', {}).get('filepath')
             if filepath and os.path.exists(filepath):
                 if filepath.lower().endswith('.mp4'):
-                    run_handbrake_conversion(filepath, output_dir, progress_callback)
+                    run_handbrake_conversion(filepath, output_dir, progress_callback, progress_bar_callback)
 
     def ytdlp_progress_hook(d):
         if d['status'] == 'downloading':
@@ -100,9 +108,18 @@ def download_youtube_video(url, output_dir, resolution="1080p", download_transcr
             msg = f"Downloading... {percent} at {speed} | ETA: {eta}"
             if progress_callback:
                 progress_callback(msg)
+            if progress_bar_callback:
+                match = re.search(r'(\d+(?:\.\d+)?)\s*%', percent)
+                if match:
+                    try:
+                        progress_bar_callback(float(match.group(1)) / 100.0)
+                    except ValueError:
+                        pass
         elif d['status'] == 'finished':
             if progress_callback:
                 progress_callback("Download complete. Preparing for Conversion...")
+            if progress_bar_callback:
+                progress_bar_callback(1.0)
 
     # Determine resolution format string
     format_str = 'bestvideo[height<=1080]+bestaudio/best'
@@ -116,15 +133,10 @@ def download_youtube_video(url, output_dir, resolution="1080p", download_transcr
         'outtmpl': os.path.join(output_dir, '%(title)s.%(ext)s'),
         'merge_output_format': 'mp4',
         
-        # Subtitles
-        'writesubtitles': download_transcripts,
-        'writeautomaticsub': download_transcripts,
-        'subtitleslangs': ['en'] if download_transcripts else [],
-        'subtitlesformat': 'srt/vtt/best' if download_transcripts else '',
-        
         'postprocessor_hooks': [handbrake_postprocessor_hook],
         'progress_hooks': [ytdlp_progress_hook],
         'quiet': True,
+        'no_color': True,
         'no_warnings': True,
     }
 
@@ -132,9 +144,40 @@ def download_youtube_video(url, output_dir, resolution="1080p", download_transcr
         with yt_dlp.YoutubeDL(yt_dlp_options) as ydl:
             if progress_callback:
                 progress_callback(f"Initializing download connection...")
-            ydl.download([url])
+            info = ydl.extract_info(url, download=True)
+            
+            # Write metadata to history file
+            try:
+                import json
+                title = info.get('title', 'Unknown Title')
+                channel = info.get('uploader', 'Unknown Channel')
+                video_url = info.get('webpage_url', url)
+                history_file = os.path.join(output_dir, "download_history.json")
+                
+                history_data = []
+                if os.path.exists(history_file):
+                    try:
+                        with open(history_file, 'r', encoding='utf-8') as f:
+                            history_data = json.load(f)
+                    except json.JSONDecodeError:
+                        pass
+                
+                history_data.append({
+                    "title": title,
+                    "channel": channel,
+                    "url": video_url
+                })
+                
+                with open(history_file, 'w', encoding='utf-8') as f:
+                    json.dump(history_data, f, indent=4)
+            except Exception as e:
+                print(f"Failed to log history: {e}")
+
         if progress_callback:
             progress_callback("All Tasks Completed Successfully!")
+        if progress_bar_callback:
+            progress_bar_callback(1.0)
+            
     except Exception as e:
         if progress_callback:
             progress_callback(f"AN UNEXPECTED ERROR OCCURRED: {e}")

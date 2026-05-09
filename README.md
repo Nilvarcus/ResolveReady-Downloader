@@ -1,15 +1,16 @@
 # YouTube Resolve-Ready Downloader
 
-A sleek, intuitive desktop application designed for video editors. It allows you to effortlessly download YouTube videos in up to 4K resolution alongside their English transcripts, and automatically transcodes them into a high-performance, editing-friendly format optimized for DaVinci Resolve.
+A sleek, intuitive desktop application designed for video editors. It allows you to effortlessly download YouTube videos in up to 4K resolution and automatically transcodes them into a high-performance, editing-friendly format optimized for DaVinci Resolve.
 
 Built with Python, `yt-dlp`, and HandBrakeCLI, wrapped in a beautiful modern GUI using **CustomTkinter**.
 
 ## ✨ Features
 - **Clean and Modern Interface:** Fully dark-mode responsive UI that stays smooth and snappy by performing heavy downloads and transcoding in the background.
+- **Progress Tracking:** Integrated a visual progress bar that tracks both the download and conversion phases in real-time.
 - **Selectable Resolutions:** Easily pick between 1080p, 1440p (2K), and 2160p (4K) source qualities.
-- **Automatic Transcripts:** A convenient toggle to download available hand-crafted or auto-generated English `.srt`/`.vtt` subtitle packages right next to your videos.
 - **Resolve-Ready Conversion:** Automatically runs downloaded footage through HandBrake to conform it to a professional standard (via a custom `resolve_preset.json`), bypassing compatibility errors and VFR (variable framerate) desyncs inside DaVinci Resolve.
-- **Custom Destinations:** Full freedom to pick exactly where both your subtitles and fully processed `.mp4` video files are saved.
+- **JSON Download History:** Automatically logs metadata (Title, Channel, URL) for every download into a structured `download_history.json` file.
+- **Custom Destinations:** Full freedom to pick exactly where your fully processed `.mp4` video files are saved.
 
 ## 📁 Architecture
 - `gui_app.py`: The frontend graphical application. Run this script to launch the interface.
@@ -21,8 +22,8 @@ Built with Python, `yt-dlp`, and HandBrakeCLI, wrapped in a beautiful modern GUI
 
 ### Using the Portable Application (Recommended)
 If you generated or downloaded the standalone application folder, all dependencies are fully packaged inside!
-1. Navigate to your `dist/ResolveReadyDownloader` folder.
-2. Double click `ResolveReadyDownloader.exe`.
+1. Navigate to your `dist` folder.
+2. Double click `YouTubeDownloader.exe`.
 
 ### Running from Source
 If modifying the codebase or running directly using Python:

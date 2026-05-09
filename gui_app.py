@@ -47,34 +47,30 @@ class YoutubeDownloaderApp(ctk.CTk):
         self.res_optionmenu = ctk.CTkOptionMenu(self.frame, values=["1080p", "1440p (2K)", "2160p (4K)"])
         self.res_optionmenu.grid(row=1, column=1, padx=15, pady=10, sticky="w")
 
-        # 3. Transcripts Toggle
-        self.transcript_switch_var = ctk.StringVar(value="on")
-        self.transcript_switch = ctk.CTkSwitch(
-            self.frame, text="Download English Transcripts", 
-            variable=self.transcript_switch_var, onvalue="on", offvalue="off"
-        )
-        self.transcript_switch.grid(row=2, column=0, columnspan=2, padx=15, pady=10, sticky="w")
-
-        # 4. Output Folder
+        # 3. Output Folder
         self.folder_label = ctk.CTkLabel(self.frame, text="Output Folder:")
-        self.folder_label.grid(row=3, column=0, padx=15, pady=10, sticky="w")
+        self.folder_label.grid(row=2, column=0, padx=15, pady=10, sticky="w")
         
         self.folder_btn = ctk.CTkButton(self.frame, text="Choose Path", command=self.pick_folder, width=120)
-        self.folder_btn.grid(row=3, column=1, padx=15, pady=10, sticky="w")
+        self.folder_btn.grid(row=2, column=1, padx=15, pady=10, sticky="w")
         
         self.active_path_label = ctk.CTkLabel(self.frame, text=self.selected_output_dir, text_color="gray", font=ctk.CTkFont(size=11))
-        self.active_path_label.grid(row=4, column=0, columnspan=2, padx=15, pady=(0, 15), sticky="w")
+        self.active_path_label.grid(row=3, column=0, columnspan=2, padx=15, pady=(0, 15), sticky="w")
 
-        # 5. Download Action
+        # 4. Download Action
         self.download_btn = ctk.CTkButton(
             self.frame, text="START DOWNLOAD", fg_color="#2FA572", hover_color="#207651",
             font=ctk.CTkFont(weight="bold"), command=self.start_download
         )
-        self.download_btn.grid(row=5, column=0, columnspan=2, padx=15, pady=15, sticky="we")
+        self.download_btn.grid(row=4, column=0, columnspan=2, padx=15, pady=15, sticky="we")
 
-        # Status Display label at bottom
+        # Status Display and Progress Bar at bottom
         self.status_label = ctk.CTkLabel(self, text="Ready.", text_color="#1F6AA5", font=ctk.CTkFont(weight="bold"))
-        self.status_label.pack(pady=10)
+        self.status_label.pack(pady=(10, 5))
+
+        self.progress_bar = ctk.CTkProgressBar(self, width=540)
+        self.progress_bar.set(0)
+        self.progress_bar.pack(pady=(0, 20))
 
     def pick_folder(self):
         folder_selected = fd.askdirectory(initialdir=self.selected_output_dir)
@@ -86,15 +82,19 @@ class YoutubeDownloaderApp(ctk.CTk):
         """Thread-safe way to update the status label from backend."""
         self.after(0, lambda: self.status_label.configure(text=message))
 
-    def _run_backend_task(self, url, output_dir, resolution, transcripts):
+    def update_progress(self, value):
+        """Thread-safe way to update the progress bar from backend."""
+        self.after(0, lambda: self.progress_bar.set(value))
+
+    def _run_backend_task(self, url, output_dir, resolution):
         """Background thread target."""
         try:
             backend.download_youtube_video(
                 url=url,
                 output_dir=output_dir,
                 resolution=resolution,
-                download_transcripts=transcripts,
-                progress_callback=self.update_status
+                progress_callback=self.update_status,
+                progress_bar_callback=self.update_progress
             )
         finally:
             self.after(0, lambda: self.download_btn.configure(state="normal", text="START DOWNLOAD"))
@@ -107,16 +107,16 @@ class YoutubeDownloaderApp(ctk.CTk):
             return
 
         resolution = self.res_optionmenu.get()
-        transcripts = (self.transcript_switch_var.get() == "on")
         output_dir = self.selected_output_dir
 
         self.download_btn.configure(state="disabled", text="PROCESSING...")
         self.update_status("Starting background process...")
+        self.update_progress(0)
 
         # Run logic in a thread to keep GUI responsive
         threading.Thread(
             target=self._run_backend_task,
-            args=(url, output_dir, resolution, transcripts),
+            args=(url, output_dir, resolution),
             daemon=True
         ).start()
 
