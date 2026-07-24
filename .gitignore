@@ -23,6 +23,12 @@ settings.json
 download_history.json
 .ytdlp_last_check
 
+# ── Project files not needed in the repo ────────────────────────────────────
+AGENTS.md
+YouTubeDownloader.spec
+test_frozen.py
+Nilvarcus-Resolve-Downloader-icon.png
+
 # ── OS / editor cruft ────────────────────────────────────────────────────────
 Thumbs.db
 Desktop.ini
