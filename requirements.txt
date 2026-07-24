@@ -1,0 +1,6 @@
+# Runtime dependencies
+yt-dlp
+customtkinter
+
+# Build dependency (only needed when compiling the .exe)
+pyinstaller

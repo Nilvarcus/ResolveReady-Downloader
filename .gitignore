@@ -1,0 +1,32 @@
+# ── Large binaries ───────────────────────────────────────────────────────────
+# These are required at runtime but are too large for git. Users must download
+# them separately — see README.md for setup instructions.
+HandBrakeCLI.exe
+ffmpeg.exe
+yt-dlp.zip
+yt-dlp.zipapp
+
+# ── Build artifacts ──────────────────────────────────────────────────────────
+build/
+dist/
+*.spec.bak
+
+# ── Python caches ────────────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# ── Runtime / user-generated files ───────────────────────────────────────────
+error.log
+settings.json
+download_history.json
+.ytdlp_last_check
+
+# ── OS / editor cruft ────────────────────────────────────────────────────────
+Thumbs.db
+Desktop.ini
+.DS_Store
+*.swp
+*.swo
+*~
