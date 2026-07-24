@@ -62,7 +62,7 @@ If you generated or downloaded the standalone application folder, all dependenci
    ```bash
    pip install -r requirements.txt
    ```
-3. Verify you have `HandBrakeCLI.exe`, `ffmpeg.exe`, and `resolve_preset.json` in the project root alongside the app icon (`Nilvarcus-Resolve-Downloader-icon.ico`).
+3. Verify you have `HandBrakeCLI.exe`, `ffmpeg.exe`, and `resolve_preset.json` in the project root. The app icon (`Nilvarcus-Resolve-Downloader-icon.ico`) is optional — the app runs fine without it.
 4. Launch the application:
    ```bash
    python gui_app.py
@@ -70,12 +70,19 @@ If you generated or downloaded the standalone application folder, all dependenci
 
 ## 🛠️ Building an Executable
 
-The project uses a PyInstaller spec file (`ResolveReadyDownloader.spec`) as its build target. This bundles `HandBrakeCLI.exe`, `ffmpeg.exe`, the preset, and the app icon while **excluding** `yt-dlp` (which is downloaded dynamically at runtime by the auto-updater, keeping the `.exe` lightweight):
+Build a standalone `.exe` using PyInstaller. The command below bundles `HandBrakeCLI.exe`, `ffmpeg.exe`, and the preset, while **excluding** `yt-dlp` (which is downloaded dynamically at runtime by the auto-updater, keeping the `.exe` lightweight):
 
 ```bash
-pyinstaller ResolveReadyDownloader.spec
+pyinstaller --noconfirm --onedir --windowed \
+  --add-data "HandBrakeCLI.exe;." \
+  --add-data "resolve_preset.json;." \
+  --add-data "ffmpeg.exe;." \
+  --collect-all customtkinter \
+  --exclude-module yt_dlp \
+  --name "ResolveReadyDownloader" \
+  "gui_app.py"
 ```
 
-This produces a `dist/ResolveReadyDownloader/` folder with the executable and bundled assets.
+If you have the app icon (`Nilvarcus-Resolve-Downloader-icon.ico`) in the project root, add `--icon "Nilvarcus-Resolve-Downloader-icon.ico"` and `--add-data "Nilvarcus-Resolve-Downloader-icon.ico;."` to the command. The first sets the `.exe` icon; the second bundles it so the app window can display it at runtime.
 
-> **Note:** `YouTubeDownloader.spec` is a legacy spec that bundles `yt_dlp` directly. It is retained for reference but `ResolveReadyDownloader.spec` is the recommended build target.
+This produces a `dist/ResolveReadyDownloader/` folder with the executable and bundled assets.
