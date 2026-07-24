@@ -79,9 +79,45 @@ pyinstaller --noconfirm --onedir --windowed \
   --add-data "ffmpeg.exe;." \
   --collect-all customtkinter \
   --exclude-module yt_dlp \
+  --collect-submodules http \
+  --collect-submodules email \
+  --collect-submodules xml \
+  --collect-submodules html \
+  --collect-submodules concurrent \
+  --collect-submodules urllib \
+  --collect-submodules collections \
+  --collect-submodules importlib \
+  --collect-submodules asyncio \
+  --hidden-import optparse \
+  --hidden-import imghdr \
+  --hidden-import netrc \
+  --hidden-import shlex \
+  --hidden-import tokenize \
+  --hidden-import quopri \
+  --hidden-import fileinput \
+  --hidden-import zipimport \
+  --hidden-import bisect \
+  --hidden-import heapq \
+  --hidden-import array \
+  --hidden-import getpass \
+  --hidden-import mimetypes \
+  --hidden-import pkgutil \
+  --hidden-import sysconfig \
+  --hidden-import contextvars \
+  --hidden-import hmac \
+  --hidden-import secrets \
+  --hidden-import calendar \
+  --hidden-import glob \
+  --hidden-import inspect \
+  --hidden-import locale \
+  --hidden-import textwrap \
+  --hidden-import uuid \
+  --hidden-import msvcrt \
   --name "ResolveReadyDownloader" \
   "gui_app.py"
 ```
+
+> **Why all the `--hidden-import` flags?** Because `yt-dlp` is excluded from the bundle (it's loaded dynamically at runtime via a zipapp), PyInstaller's static analysis never traces yt-dlp's imports. This means dozens of standard-library modules that yt-dlp depends on — most critically `http.cookies`, `http.cookiejar`, and `http.client` — are silently left out of the build, causing a `ModuleNotFoundError` at runtime. The `--collect-submodules` flags grab every submodule of those packages automatically (far more robust than listing each one by hand), and the `--hidden-import` flags cover top-level stdlib modules that yt-dlp uses but the app itself never imports directly.
 
 If you have the app icon (`Nilvarcus-Resolve-Downloader-icon.ico`) in the project root, add `--icon "Nilvarcus-Resolve-Downloader-icon.ico"` and `--add-data "Nilvarcus-Resolve-Downloader-icon.ico;."` to the command. The first sets the `.exe` icon; the second bundles it so the app window can display it at runtime.
 

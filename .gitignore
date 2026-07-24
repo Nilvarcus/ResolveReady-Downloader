@@ -31,6 +31,12 @@ test_frozen.py
 Nilvarcus-Resolve-Downloader-icon.png
 Nilvarcus-Resolve-Downloader-icon.ico
 
+# ── Release artifacts ───────────────────────────────────────────────────────
+# Bundled release builds and stray files; the repo only holds source files.
+Nilvarcus-Resolve-Ready-Downloader-*-release/
+Nilvarcus-Resolve-Ready-Downloader-*-release.zip
+nul
+
 # ── OS / editor cruft ────────────────────────────────────────────────────────
 Thumbs.db
 Desktop.ini
