@@ -26,8 +26,10 @@ download_history.json
 # ── Project files not needed in the repo ────────────────────────────────────
 AGENTS.md
 YouTubeDownloader.spec
+ResolveReadyDownloader.spec
 test_frozen.py
 Nilvarcus-Resolve-Downloader-icon.png
+Nilvarcus-Resolve-Downloader-icon.ico
 
 # ── OS / editor cruft ────────────────────────────────────────────────────────
 Thumbs.db
