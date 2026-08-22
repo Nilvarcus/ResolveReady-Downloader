@@ -22,6 +22,10 @@ error.log
 settings.json
 download_history.json
 .ytdlp_last_check
+.ytdlp_last_check_v2
+.ytdlp_last_check_v3
+*.part
+*.ytdl
 
 # ── Project files not needed in the repo ────────────────────────────────────
 AGENTS.md

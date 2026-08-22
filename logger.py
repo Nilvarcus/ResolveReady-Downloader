@@ -45,3 +45,27 @@ def log_exception(context=""):
         log(f"{context}\n{tb_text}" if context else tb_text, level="ERROR")
     except Exception:
         pass
+
+
+def read_log():
+    """
+    Returns the full contents of error.log, or an empty string if the file
+    doesn't exist or can't be read.
+    """
+    try:
+        if os.path.exists(LOG_FILE):
+            with open(LOG_FILE, 'r', encoding='utf-8', errors='replace') as f:
+                return f.read()
+    except Exception:
+        pass
+    return ""
+
+
+def clear_log():
+    """
+    Clears the error.log file by truncating it to zero bytes.
+    """
+    try:
+        open(LOG_FILE, 'w', encoding='utf-8').close()
+    except Exception:
+        pass

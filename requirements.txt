@@ -1,5 +1,5 @@
 # Runtime dependencies
-yt-dlp
+yt-dlp[default]
 customtkinter
 
 # Build dependency (only needed when compiling the .exe)
