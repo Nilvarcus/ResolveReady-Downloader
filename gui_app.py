@@ -1,6 +1,7 @@
 import customtkinter as ctk
 import tkinter.filedialog as fd
 import threading
+import queue
 import os
 import sys
 import json
@@ -41,6 +42,7 @@ STATUS_PENDING = "#555555"
 
 # Font family — falls back gracefully if Segoe UI isn't available
 FONT_FAMILY = "Segoe UI"
+APP_VERSION = "1.4"
 
 # ==============================================================================
 # SETTINGS PERSISTENCE
@@ -122,9 +124,9 @@ class CardFrame(ctk.CTkFrame):
 
 
 class QueueRow(ctk.CTkFrame):
-    """A single queue item row with a status dot, label, and remove button."""
+    """A single queue item row with a status dot, label, error button, and remove button."""
 
-    def __init__(self, master, url, item_id, on_remove, **kwargs):
+    def __init__(self, master, url, item_id, on_remove, on_show_error=None, **kwargs):
         super().__init__(
             master,
             fg_color=BG_CARD_LIGHT,
@@ -135,6 +137,7 @@ class QueueRow(ctk.CTkFrame):
 
         self.item_id = item_id
         self._url = url  # Store for clean status updates
+        self._on_show_error = on_show_error
 
         # Status dot
         self.dot = StatusDot(self, color=STATUS_PENDING, size=9)
@@ -148,6 +151,17 @@ class QueueRow(ctk.CTkFrame):
             anchor="w"
         )
         self.label.pack(side="left", fill="x", expand=True, padx=(0, 8), pady=8)
+
+        # Error details button — hidden by default, shown only on error status
+        self.error_btn = ctk.CTkButton(
+            self, text="\u26A0", width=28, height=24,
+            fg_color="transparent", hover_color=BG_DEEP,
+            text_color=STATUS_ERROR,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=12),
+            corner_radius=6,
+            command=lambda: on_show_error(item_id) if on_show_error else None
+        )
+        # Packed dynamically in set_status when status == 'error'
 
         # Remove button
         self.remove_btn = ctk.CTkButton(
@@ -166,6 +180,7 @@ class QueueRow(ctk.CTkFrame):
         Internal status values are lowercase ('pending', 'processing',
         'done', 'error', 'cancelled'). The display text is capitalized
         here so the user sees a clean label like "Done" instead of "done".
+        The ⚠ button is shown only when the item has errored.
         """
         self.dot.set_color(color)
         display = status_text.capitalize() if status_text else status_text
@@ -173,6 +188,12 @@ class QueueRow(ctk.CTkFrame):
             text=f"{display}  \u00B7  {self._url}",
             text_color=color if status_text != "pending" else TEXT_SECONDARY
         )
+
+        # Show or hide the error details button
+        if status_text == "error":
+            self.error_btn.pack(side="right", padx=(0, 4), pady=8)
+        else:
+            self.error_btn.pack_forget()
 
 
 # ==============================================================================
@@ -184,7 +205,7 @@ class YoutubeDownloaderApp(ctk.CTk):
         super().__init__()
 
         # ── Window setup ─────────────────────────────────────────────────────
-        self.title("Resolve-Ready Downloader")
+        self.title(f"Resolve-Ready Downloader v{APP_VERSION}")
         self.geometry("620x810")
         self.resizable(False, False)
         self.configure(fg_color=BG_DEEP)
@@ -209,10 +230,21 @@ class YoutubeDownloaderApp(ctk.CTk):
             logger.log(f"Could not load icon: {e}")
 
         # ── State ────────────────────────────────────────────────────────────
+        logger.log(
+            f"Starting Resolve-Ready Downloader v{APP_VERSION}; "
+            f"frozen={getattr(sys, 'frozen', False)}; "
+            f"executable={sys.executable}; "
+            f"bundle={getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))}; "
+            f"updater_version=1.4",
+            level="INFO",
+        )
         self.download_queue = []
+        self._queue_lock = threading.RLock()
+        self._ui_events = queue.Queue()
         self.is_processing = False
         self.current_cancel_event = None
         self._queue_counter = 0
+        self.after(50, self._drain_ui_events)
 
         settings = load_settings()
         self.selected_output_dir = settings["output_dir"]
@@ -461,6 +493,18 @@ class YoutubeDownloaderApp(ctk.CTk):
         )
         self.clear_btn.pack(side="right")
 
+        # Error Log button — opens a popup showing the full error.log
+        self.log_btn = ctk.CTkButton(
+            queue_header, text="\u26A0  Error Log", width=100, height=24,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=10),
+            fg_color="transparent", hover_color=BG_CARD_LIGHT,
+            text_color=STATUS_ERROR,
+            corner_radius=6,
+            border_width=1, border_color=BORDER_SUBTLE,
+            command=self._show_error_log
+        )
+        self.log_btn.pack(side="right", padx=(0, 8))
+
         # Scrollable queue frame
         self.queue_frame = ctk.CTkScrollableFrame(
             self, width=560, height=180,
@@ -491,25 +535,34 @@ class YoutubeDownloaderApp(ctk.CTk):
     # UPDATER COMPLETION
     # ──────────────────────────────────────────────────────────────────────────
 
-    def _on_updater_finished(self):
-        """Called when yt-dlp updater completes. Enables the UI and loads backend."""
+    def _on_updater_finished(self, success=True, error_message=None):
+        """Load the backend only after the updater has verified dependencies."""
+        if not success:
+            message = error_message or "yt-dlp could not be prepared."
+            logger.log(f"Updater did not make the backend ready: {message}")
+            self._run_on_ui(lambda: self._show_backend_error(message))
+            return
+
         try:
             import downloader as backend
             self.backend = backend
-
-            def _enable():
-                self.download_btn.configure(state="normal")
-                self.status_label.configure(text="Ready.")
-                self.status_dot.set_color(STATUS_OK)
-            self.after(0, _enable)
-        except Exception as e:
-            err_msg = str(e)
+            self._run_on_ui(self._enable_downloads)
+        except Exception as exc:
+            err_msg = str(exc)
             logger.log_exception("Failed to load backend after updater finished")
+            self._run_on_ui(lambda: self._show_backend_error(
+                f"Backend could not be loaded: {err_msg}"
+            ))
 
-            def _show_err():
-                self.status_label.configure(text=f"Backend Error: {err_msg}", text_color=STATUS_ERROR)
-                self.status_dot.set_color(STATUS_ERROR)
-            self.after(0, _show_err)
+    def _enable_downloads(self):
+        self.download_btn.configure(state="normal")
+        self.status_label.configure(text=f"Ready. v{APP_VERSION}", text_color=TEXT_PRIMARY)
+        self.status_dot.set_color(STATUS_OK)
+
+    def _show_backend_error(self, message):
+        self.download_btn.configure(state="disabled")
+        self.status_label.configure(text=message, text_color=STATUS_ERROR)
+        self.status_dot.set_color(STATUS_ERROR)
 
     # ──────────────────────────────────────────────────────────────────────────
     # SETTINGS
@@ -547,38 +600,52 @@ class YoutubeDownloaderApp(ctk.CTk):
     # THREAD-SAFE UI UPDATES
     # ──────────────────────────────────────────────────────────────────────────
 
-    def update_status(self, message, color=None):
-        """Thread-safe way to update the status label from backend.
+    def _run_on_ui(self, callback):
+        """Queue a callback for execution by Tk's main thread."""
+        self._ui_events.put(callback)
 
-        If color is provided, both the text color and status dot are updated.
-        If color is None (typical for backend progress callbacks), only the
-        text is changed — the previous color is preserved so the dot doesn't
-        flicker during rapid progress updates.
-        """
+    def _drain_ui_events(self):
+        """Run worker callbacks from the Tk main thread only."""
+        try:
+            while True:
+                callback = self._ui_events.get_nowait()
+                try:
+                    callback()
+                except Exception:
+                    logger.log_exception("UI event callback failed")
+        except queue.Empty:
+            pass
+        if self.winfo_exists():
+            self.after(50, self._drain_ui_events)
+
+    def update_status(self, message, color=None):
+        """Queue a thread-safe status update without calling Tk from workers."""
         def _update():
             self.status_label.configure(text=message)
             if color:
                 self.status_label.configure(text_color=color)
                 self.status_dot.set_color(color)
-        self.after(0, _update)
+        self._run_on_ui(_update)
 
     def update_progress(self, value):
-        """Thread-safe way to update the progress bar from backend."""
-        self.after(0, lambda: self.progress_bar.set(value))
+        """Queue a thread-safe progress-bar update."""
+        self._run_on_ui(lambda: self.progress_bar.set(value))
 
     def _set_queue_item_status(self, item_id, status, color):
-        """Thread-safe way to update a queue item's status dot and label."""
+        """Queue a queue-row state update for the Tk main thread."""
         def _update():
             item = self._find_queue_item(item_id)
             if item and item.get('row'):
-                item['status'] = status
+                with self._queue_lock:
+                    item['status'] = status
                 item['row'].set_status(status, color)
-        self.after(0, _update)
+        self._run_on_ui(_update)
 
     def _find_queue_item(self, item_id):
-        for item in self.download_queue:
-            if item['id'] == item_id:
-                return item
+        with self._queue_lock:
+            for item in self.download_queue:
+                if item['id'] == item_id:
+                    return item
         return None
 
     # ──────────────────────────────────────────────────────────────────────────
@@ -587,8 +654,10 @@ class YoutubeDownloaderApp(ctk.CTk):
 
     def cancel_current(self):
         """Signals the in-progress download to abort."""
-        if self.current_cancel_event:
-            self.current_cancel_event.set()
+        with self._queue_lock:
+            cancel_event = self.current_cancel_event
+        if cancel_event:
+            cancel_event.set()
             self.update_status("Cancelling current download...", STATUS_WARN)
 
     # ──────────────────────────────────────────────────────────────────────────
@@ -619,21 +688,174 @@ class YoutubeDownloaderApp(ctk.CTk):
         # IMPORTANT: destroy the UI row BEFORE removing from the list,
         # because _remove_queue_item_ui looks up the item in
         # download_queue to get the row reference.
-        self._remove_queue_item_ui(item_id)
-        self.download_queue.remove(item)
+        with self._queue_lock:
+            if item.get('status') == 'processing':
+                return
+            self._remove_queue_item_ui(item_id)
+            if item in self.download_queue:
+                self.download_queue.remove(item)
         self._update_queue_count()
         self.update_status("Removed from queue.", TEXT_SECONDARY)
 
     def clear_completed(self):
         """Remove all completed, error, and cancelled items from the queue UI and state."""
-        to_remove = [item for item in self.download_queue if item.get('status') in ('done', 'error', 'cancelled')]
-        for item in to_remove:
-            self._remove_queue_item_ui(item['id'])
-            self.download_queue.remove(item)
-        if not any(item.get('status') in ('done', 'error', 'cancelled') for item in self.download_queue):
+        with self._queue_lock:
+            to_remove = [
+                item for item in self.download_queue
+                if item.get('status') in ('done', 'error', 'cancelled')
+            ]
+            for item in to_remove:
+                self._remove_queue_item_ui(item['id'])
+                if item in self.download_queue:
+                    self.download_queue.remove(item)
+            has_clearable = any(
+                item.get('status') in ('done', 'error', 'cancelled')
+                for item in self.download_queue
+            )
+        if not has_clearable:
             self.clear_btn.configure(state="disabled")
         self._update_queue_count()
         self.update_status("Cleared completed items." if to_remove else "Nothing to clear.", TEXT_SECONDARY)
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # ERROR VIEWER POPUPS
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def _show_error_details_for_item(self, item_id):
+        """Shows a popup with the captured error message for a specific queue item."""
+        item = self._find_queue_item(item_id)
+        if not item:
+            return
+
+        url = item.get('url', 'Unknown')
+        error_msg = item.get('last_error') or "No detailed error was captured for this item.\n\nCheck the Error Log for the full traceback."
+
+        popup = ctk.CTkToplevel(self)
+        popup.title("Error Details")
+        popup.geometry("560x300")
+        popup.resizable(False, False)
+        popup.configure(fg_color=BG_DEEP)
+        popup.attributes("-topmost", True)
+        popup.grab_set()
+
+        # Header
+        header = ctk.CTkLabel(
+            popup, text="\u26A0  Download Error",
+            font=ctk.CTkFont(family=FONT_FAMILY, size=16, weight="bold"),
+            text_color=STATUS_ERROR
+        )
+        header.pack(anchor="w", padx=20, pady=(16, 4))
+
+        # URL label
+        url_label = ctk.CTkLabel(
+            popup, text=f"URL: {url}",
+            font=ctk.CTkFont(family="Consolas", size=11),
+            text_color=TEXT_SECONDARY, anchor="w"
+        )
+        url_label.pack(anchor="w", padx=20, pady=(0, 10))
+
+        # Error text box
+        textbox = ctk.CTkTextbox(
+            popup, font=ctk.CTkFont(family="Consolas", size=12),
+            fg_color=BG_CARD, border_width=1, border_color=BORDER_SUBTLE,
+            corner_radius=8, text_color=TEXT_PRIMARY,
+            wrap="word"
+        )
+        textbox.pack(fill="both", expand=True, padx=20, pady=(0, 16))
+        textbox.insert("1.0", error_msg)
+        textbox.configure(state="disabled")
+
+        # Close button
+        close_btn = ctk.CTkButton(
+            popup, text="Close", width=100, height=32,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=12, weight="bold"),
+            fg_color=CRIMSON, hover_color=CRIMSON_DARK,
+            text_color="#FFFFFF", corner_radius=8,
+            command=popup.destroy
+        )
+        close_btn.pack(pady=(0, 16))
+
+    def _show_error_log(self):
+        """Opens a popup showing the full contents of error.log with Refresh/Clear buttons."""
+        popup = ctk.CTkToplevel(self)
+        popup.title("Error Log")
+        popup.geometry("620x460")
+        popup.resizable(False, False)
+        popup.configure(fg_color=BG_DEEP)
+        popup.attributes("-topmost", True)
+        popup.grab_set()
+
+        # Header
+        header = ctk.CTkLabel(
+            popup, text="\u26A0  Error Log",
+            font=ctk.CTkFont(family=FONT_FAMILY, size=16, weight="bold"),
+            text_color=STATUS_ERROR
+        )
+        header.pack(anchor="w", padx=20, pady=(16, 4))
+
+        sub_label = ctk.CTkLabel(
+            popup, text=f"{logger.LOG_FILE}",
+            font=ctk.CTkFont(family="Consolas", size=10),
+            text_color=TEXT_DIM, anchor="w"
+        )
+        sub_label.pack(anchor="w", padx=20, pady=(0, 10))
+
+        # Log text box
+        textbox = ctk.CTkTextbox(
+            popup, font=ctk.CTkFont(family="Consolas", size=11),
+            fg_color=BG_CARD, border_width=1, border_color=BORDER_SUBTLE,
+            corner_radius=8, text_color=TEXT_PRIMARY,
+            wrap="none"
+        )
+        textbox.pack(fill="both", expand=True, padx=20, pady=(0, 12))
+
+        def _refresh_log():
+            textbox.configure(state="normal")
+            textbox.delete("1.0", "end")
+            content = logger.read_log()
+            textbox.insert("1.0", content if content else "(log is empty)")
+            textbox.configure(state="disabled")
+            textbox.see("end")
+
+        def _clear_log():
+            logger.clear_log()
+            _refresh_log()
+
+        # Button row
+        btn_frame = ctk.CTkFrame(popup, fg_color="transparent", corner_radius=0)
+        btn_frame.pack(fill="x", padx=20, pady=(0, 16))
+
+        refresh_btn = ctk.CTkButton(
+            btn_frame, text="\u21BB  Refresh", width=100, height=32,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=12, weight="bold"),
+            fg_color=BG_CARD_LIGHT, hover_color=BG_DEEP,
+            text_color=CRIMSON, corner_radius=8,
+            border_width=1, border_color=BORDER_SUBTLE,
+            command=_refresh_log
+        )
+        refresh_btn.pack(side="left", padx=(0, 8))
+
+        clear_log_btn = ctk.CTkButton(
+            btn_frame, text="Clear Log", width=100, height=32,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=12, weight="bold"),
+            fg_color=BG_CARD_LIGHT, hover_color=BG_DEEP,
+            text_color=TEXT_SECONDARY, corner_radius=8,
+            border_width=1, border_color=BORDER_SUBTLE,
+            command=_clear_log
+        )
+        clear_log_btn.pack(side="left", padx=(0, 8))
+
+        close_btn = ctk.CTkButton(
+            btn_frame, text="Close", width=100, height=32,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=12, weight="bold"),
+            fg_color=CRIMSON, hover_color=CRIMSON_DARK,
+            text_color="#FFFFFF", corner_radius=8,
+            command=popup.destroy
+        )
+        close_btn.pack(side="right")
+
+        # Load initial content
+        _refresh_log()
 
     # ──────────────────────────────────────────────────────────────────────────
     # QUEUE PROCESSING
@@ -641,29 +863,42 @@ class YoutubeDownloaderApp(ctk.CTk):
 
     def process_queue(self):
         """Background thread target that processes the queue sequentially."""
-        # NOTE: self.is_processing is set to True by _start_processing_if_idle
-        # on the UI thread BEFORE this thread is launched.
-        self.after(0, lambda: self.cancel_btn.configure(state="normal", text_color="#FFFFFF"))
+        self._run_on_ui(lambda: self.cancel_btn.configure(
+            state="normal", text_color="#FFFFFF"
+        ))
         self.update_status("Processing queue...", CRIMSON_BRIGHT)
 
         while True:
-            current = None
-            for item in list(self.download_queue):
-                if item.get('status') == 'pending':
-                    current = item
+            with self._queue_lock:
+                current = next(
+                    (item for item in self.download_queue
+                     if item.get('status') == 'pending'),
+                    None,
+                )
+                if current is None:
                     break
-
-            if not current:
-                break
+                current['status'] = 'processing'
+                cancel_event = threading.Event()
+                self.current_cancel_event = cancel_event
 
             item_id = current['id']
             url = current['url']
             output_dir = current['output_dir']
             resolution = current['resolution']
-
             self._set_queue_item_status(item_id, "processing", STATUS_WARN)
 
-            self.current_cancel_event = threading.Event()
+            # Capture only final/actionable errors for the queue row. Intermediate
+            # yt-dlp retry diagnostics remain in error.log.
+            def _capture_callback(message, color=None, _item=current):
+                self.update_status(message, color)
+                if (
+                    color == STATUS_ERROR
+                    or message.startswith((
+                        "ERROR", "Encoding failed", "WARNING: Failed",
+                    ))
+                ):
+                    with self._queue_lock:
+                        _item['last_error'] = message
 
             success = False
             try:
@@ -671,33 +906,57 @@ class YoutubeDownloaderApp(ctk.CTk):
                     url=url,
                     output_dir=output_dir,
                     resolution=resolution,
-                    progress_callback=self.update_status,
+                    progress_callback=_capture_callback,
                     progress_bar_callback=self.update_progress,
-                    cancel_event=self.current_cancel_event
+                    cancel_event=cancel_event,
                 )
-            except Exception as e:
-                self.update_status(f"Error processing {url}: {e}", STATUS_ERROR)
+            except Exception as exc:
+                err_msg = str(exc)
+                self.update_status(f"Error processing {url}: {err_msg}", STATUS_ERROR)
+                with self._queue_lock:
+                    current['last_error'] = f"Exception: {err_msg}"
                 logger.log_exception(f"process_queue error for {url}")
 
-            # Update status based on actual result
-            if self.current_cancel_event.is_set():
-                self._set_queue_item_status(item_id, "cancelled", STATUS_CANCEL)
-            elif success:
-                self._set_queue_item_status(item_id, "done", STATUS_OK)
-            else:
-                self._set_queue_item_status(item_id, "error", STATUS_ERROR)
+            with self._queue_lock:
+                if cancel_event.is_set():
+                    final_status, final_color = "cancelled", STATUS_CANCEL
+                elif success:
+                    final_status, final_color = "done", STATUS_OK
+                else:
+                    if not current.get('last_error'):
+                        current['last_error'] = (
+                            "Download failed with no specific error message captured.\n\n"
+                            "Check the Error Log for the full traceback."
+                        )
+                    final_status, final_color = "error", STATUS_ERROR
+                current['status'] = final_status
+                self.current_cancel_event = None
 
-            self.current_cancel_event = None
+            self._set_queue_item_status(item_id, final_status, final_color)
             self.update_progress(0)
-            self.after(0, self._maybe_enable_clear)
+            self._run_on_ui(self._maybe_enable_clear)
 
-        self.is_processing = False
-        self.after(0, lambda: self.cancel_btn.configure(state="disabled", text_color=TEXT_SECONDARY))
-        self.update_status("Queue finished.", STATUS_OK)
-        self.after(0, lambda: self.progress_bar.set(0))
+        with self._queue_lock:
+            self.is_processing = False
+            has_errors = any(
+                item.get('status') == 'error' for item in self.download_queue
+            )
+        self._run_on_ui(lambda: self.cancel_btn.configure(
+            state="disabled", text_color=TEXT_SECONDARY
+        ))
+        self.update_status(
+            "Queue finished with errors." if has_errors else "Queue finished.",
+            STATUS_ERROR if has_errors else STATUS_OK,
+        )
+        self.update_progress(0)
 
     def _maybe_enable_clear(self):
-        if any(item.get('status') in ('done', 'error', 'cancelled') for item in self.download_queue):
+        with self._queue_lock:
+            has_clearable = any(
+                item.get('status') in ('done', 'error', 'cancelled')
+                for item in self.download_queue
+            )
+        if has_clearable:
             self.clear_btn.configure(state="normal", text_color=CRIMSON)
 
     # ──────────────────────────────────────────────────────────────────────────
@@ -728,7 +987,13 @@ class YoutubeDownloaderApp(ctk.CTk):
             if not url:
                 continue
 
-            if any(item['url'] == url for item in self.download_queue):
+            identity = self.backend.get_download_identity(url)
+            with self._queue_lock:
+                already_queued = any(
+                    item.get('identity') == identity or item['url'] == url
+                    for item in self.download_queue
+                )
+            if already_queued:
                 self.update_status(f"Already in queue: {url}", STATUS_WARN)
                 continue
 
@@ -764,48 +1029,81 @@ class YoutubeDownloaderApp(ctk.CTk):
                 if len(entries) > 1:
                     self.update_status(f"Found playlist with {len(entries)} videos", CRIMSON_BRIGHT)
                 all_urls.extend(entries)
-            except Exception:
+            except Exception as exc:
+                self.update_status(
+                    f"WARNING: Could not expand playlist; treating it as one URL ({exc})",
+                    STATUS_WARN,
+                )
+                logger.log_exception(f"Playlist expansion failed for {url}")
                 all_urls.append(url)
 
         for url in all_urls:
             url = url.strip()
             if not url:
                 continue
-            self.after(0, lambda u=url: self._add_queue_item(u, resolution, output_dir))
+            self._run_on_ui(
+                lambda u=url: self._add_queue_item(u, resolution, output_dir)
+            )
 
-        self.after(0, self._start_processing_if_idle)
+        self._run_on_ui(self._start_processing_if_idle)
 
     def _add_queue_item(self, url, resolution, output_dir):
-        """Adds a single item to the queue state and creates its UI row."""
-        if any(item['url'] == url for item in self.download_queue):
+        """Adds a new, not-yet-downloaded item to the queue state."""
+        identity = self.backend.get_download_identity(url)
+        with self._queue_lock:
+            if any(
+                item.get('identity') == identity or item['url'] == url
+                for item in self.download_queue
+            ):
+                self.update_status(f"Already in queue: {url}", STATUS_WARN)
+                return
+
+        history_record = self.backend.get_download_history_record(url, output_dir)
+        if history_record:
+            title = history_record.get('title') or url
+            self.update_status(f"Already downloaded: {title}", STATUS_WARN)
             return
 
-        self._queue_counter += 1
-        item_id = f"item_{self._queue_counter}"
+        with self._queue_lock:
+            self._queue_counter += 1
+            item_id = f"item_{self._queue_counter}"
 
         row = QueueRow(
             self.queue_frame,
             url=url,
             item_id=item_id,
-            on_remove=self.remove_queue_item
+            on_remove=self.remove_queue_item,
+            on_show_error=self._show_error_details_for_item
         )
         row.pack(fill="x", pady=3, padx=4)
 
         item = {
             'id': item_id,
             'url': url,
+            'identity': identity,
             'resolution': resolution,
             'output_dir': output_dir,
             'status': 'pending',
             'row': row,
+            'last_error': None,
         }
-        self.download_queue.append(item)
+        with self._queue_lock:
+            self.download_queue.append(item)
         self._update_queue_count()
 
     def _start_processing_if_idle(self):
         """Start the queue processor if nothing is currently running."""
-        if not self.is_processing and any(item.get('status') == 'pending' for item in self.download_queue):
-            self.is_processing = True
+        with self._queue_lock:
+            has_pending = any(
+                item.get('status') == 'pending'
+                for item in self.download_queue
+            )
+            if not self.is_processing and has_pending:
+                self.is_processing = True
+                should_start = True
+            else:
+                should_start = False
+        if should_start:
             threading.Thread(target=self.process_queue, daemon=True).start()
 
 
